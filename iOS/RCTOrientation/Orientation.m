@@ -9,6 +9,11 @@
 #import "RCTEventDispatcher.h"
 #endif
 
+@implementation Orientation (Private)
+    UIInterfaceOrientation orientationLast, orientationAfterProcess;
+    CMMotionManager *motionManager;
+@end
+
 @implementation Orientation
 @synthesize bridge = _bridge;
 
@@ -24,14 +29,71 @@ static UIInterfaceOrientationMask _orientation = UIInterfaceOrientationMaskAllBu
 {
   if ((self = [super init])) {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(deviceOrientationDidChange:) name:@"UIDeviceOrientationDidChangeNotification" object:nil];
+      dispatch_async(dispatch_get_main_queue(), ^{
+          [self initializeMotionManager];
+      });
   }
   return self;
 
 }
 
+- (void)initializeMotionManager{
+    motionManager = [[CMMotionManager alloc] init];
+    motionManager.accelerometerUpdateInterval = .2;
+    motionManager.gyroUpdateInterval = .2;
+    
+    [motionManager startAccelerometerUpdatesToQueue:[NSOperationQueue currentQueue]
+                                        withHandler:^(CMAccelerometerData  *accelerometerData, NSError *error) {
+                                            if (!error) {
+                                                dispatch_async(dispatch_get_main_queue(), ^{
+                                                    [self outputAccelerationData:accelerometerData.acceleration];
+                                                });
+                                                
+                                            }
+                                            else{
+                                                NSLog(@"%@", error);
+                                            }
+                                        }];
+}
+
+- (void)outputAccelerationData:(CMAcceleration)acceleration{
+    UIInterfaceOrientation orientationNew;
+    NSString *orientationStr = @"PORTRAIT";
+    if (acceleration.x >= 0.75) {
+        orientationNew = UIInterfaceOrientationLandscapeLeft;
+        orientationStr = @"LANDSCAPE-LEFT";
+        NSLog(@"Landscape Left");
+    }
+    else if (acceleration.x <= -0.75) {
+        orientationNew = UIInterfaceOrientationLandscapeRight;
+        orientationStr = @"LANDSCAPE-RIGHT";
+        NSLog(@"Landscape Right");
+    }
+    else if (acceleration.y <= -0.75) {
+        orientationNew = UIInterfaceOrientationPortrait;
+        orientationStr = @"PORTRAIT";
+        NSLog(@"Portrait");
+    }
+    else if (acceleration.y >= 0.75) {
+        orientationNew = UIInterfaceOrientationPortraitUpsideDown;
+    }
+    else {
+        // Consider same as last time
+        return;
+    }
+    
+    if (orientationNew == orientationLast)
+        return;
+    
+    orientationLast = orientationNew;
+    [self.bridge.eventDispatcher sendDeviceEventWithName:@"sensorOrientationChangeEvent"
+                                                    body:@{@"orientation": orientationStr}];
+}
+
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [motionManager stopAccelerometerUpdates];
 }
 
 + (BOOL)requiresMainQueueSetup
